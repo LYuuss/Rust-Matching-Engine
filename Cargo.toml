@@ -1,0 +1,9 @@
+[package]
+name = "rust-matching-engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["Lyes"]
+description = "A simplified Rust matching engine with limit orders, price-time priority and partial fills."
+license = "MIT"
+
+[dependencies]

@@ -1,0 +1,122 @@
+use rust_matching_engine::{MatchingEngine, Price, Side};
+
+fn price(value: &str) -> Price {
+    Price::parse(value).unwrap()
+}
+
+#[test]
+fn non_crossing_orders_rest_in_the_book() {
+    let mut engine = MatchingEngine::new();
+
+    let sell = engine
+        .submit_limit_order(Side::Sell, 10, price("101.00"))
+        .unwrap();
+    let buy = engine
+        .submit_limit_order(Side::Buy, 5, price("100.00"))
+        .unwrap();
+
+    assert_eq!(sell.trades.len(), 0);
+    assert_eq!(buy.trades.len(), 0);
+    assert_eq!(engine.book().best_bid(), Some(price("100.00")));
+    assert_eq!(engine.book().best_ask(), Some(price("101.00")));
+}
+
+#[test]
+fn buy_order_crosses_with_best_ask() {
+    let mut engine = MatchingEngine::new();
+
+    let resting_sell = engine
+        .submit_limit_order(Side::Sell, 10, price("100.00"))
+        .unwrap();
+    let incoming_buy = engine
+        .submit_limit_order(Side::Buy, 4, price("101.00"))
+        .unwrap();
+
+    assert_eq!(resting_sell.order_id, 1);
+    assert_eq!(incoming_buy.order_id, 2);
+    assert_eq!(incoming_buy.trades.len(), 1);
+    assert_eq!(incoming_buy.trades[0].maker_order_id, 1);
+    assert_eq!(incoming_buy.trades[0].taker_order_id, 2);
+    assert_eq!(incoming_buy.trades[0].quantity, 4);
+    assert_eq!(incoming_buy.trades[0].price, price("100.00"));
+    assert_eq!(incoming_buy.remaining, 0);
+    assert_eq!(engine.book().best_ask(), Some(price("100.00")));
+}
+
+#[test]
+fn partial_fill_leaves_remainder_on_resting_order() {
+    let mut engine = MatchingEngine::new();
+
+    engine
+        .submit_limit_order(Side::Sell, 10, price("100.00"))
+        .unwrap();
+    engine
+        .submit_limit_order(Side::Buy, 4, price("100.00"))
+        .unwrap();
+
+    assert_eq!(engine.book().total_volume(Side::Sell), 6);
+    assert_eq!(engine.book().total_volume(Side::Buy), 0);
+}
+
+#[test]
+fn incoming_remainder_rests_after_partial_execution() {
+    let mut engine = MatchingEngine::new();
+
+    engine
+        .submit_limit_order(Side::Sell, 3, price("100.00"))
+        .unwrap();
+    let buy = engine
+        .submit_limit_order(Side::Buy, 10, price("100.00"))
+        .unwrap();
+
+    assert_eq!(buy.trades.len(), 1);
+    assert_eq!(buy.remaining, 7);
+    assert_eq!(engine.book().best_bid(), Some(price("100.00")));
+    assert_eq!(engine.book().total_volume(Side::Buy), 7);
+}
+
+#[test]
+fn price_time_priority_is_respected() {
+    let mut engine = MatchingEngine::new();
+
+    let first_sell = engine
+        .submit_limit_order(Side::Sell, 5, price("100.00"))
+        .unwrap();
+    let second_sell = engine
+        .submit_limit_order(Side::Sell, 5, price("100.00"))
+        .unwrap();
+    let buy = engine
+        .submit_limit_order(Side::Buy, 7, price("100.00"))
+        .unwrap();
+
+    assert_eq!(first_sell.order_id, 1);
+    assert_eq!(second_sell.order_id, 2);
+    assert_eq!(buy.trades.len(), 2);
+    assert_eq!(buy.trades[0].maker_order_id, 1);
+    assert_eq!(buy.trades[0].quantity, 5);
+    assert_eq!(buy.trades[1].maker_order_id, 2);
+    assert_eq!(buy.trades[1].quantity, 2);
+    assert_eq!(engine.book().total_volume(Side::Sell), 3);
+}
+
+#[test]
+fn cancel_order_removes_it_from_book() {
+    let mut engine = MatchingEngine::new();
+
+    let response = engine
+        .submit_limit_order(Side::Buy, 5, price("99.00"))
+        .unwrap();
+
+    let cancelled = engine.cancel_order(response.order_id).unwrap();
+
+    assert_eq!(cancelled.id, response.order_id);
+    assert_eq!(engine.book().total_orders(), 0);
+    assert_eq!(engine.book().best_bid(), None);
+}
+
+#[test]
+fn price_parser_uses_cents_not_floats() {
+    assert_eq!(price("100").to_string(), "100.00");
+    assert_eq!(price("100.5").to_string(), "100.50");
+    assert_eq!(price("100.05").to_string(), "100.05");
+}
