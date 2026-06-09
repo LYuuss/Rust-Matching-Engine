@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::str::FromStr;
+use std::time::Instant;
 
 use rust_matching_engine::{MatchingEngine, Price, Side};
 
@@ -16,6 +17,13 @@ fn main() {
 
     match args[1].as_str() {
         "demo" => run_demo(&mut engine),
+        "benchmark" => {
+            let order_count = args
+                .get(2)
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(100_000);
+            run_benchmark(order_count);
+        }
         "scenario" => {
             if args.len() != 3 {
                 eprintln!("Usage: cargo run -- scenario examples/basic.txt");
@@ -47,12 +55,14 @@ fn print_help() {
     println!("  cargo run -- demo");
     println!("  cargo run -- scenario examples/basic.txt");
     println!("  cargo run -- submit <buy|sell> <quantity> <price>");
+    println!("  cargo run -- benchmark [order_count]");
     println!();
     println!("Scenario commands:");
     println!("  submit <buy|sell> <quantity> <price>");
     println!("  cancel <order_id>");
     println!("  book [depth]");
     println!("  trades");
+    println!("  stats");
 }
 
 fn run_demo(engine: &mut MatchingEngine) {
@@ -71,6 +81,7 @@ submit buy 8 102.00
 
 book 10
 trades
+stats
 "#;
 
     run_scenario(engine, scenario);
@@ -105,6 +116,7 @@ fn execute_command(engine: &mut MatchingEngine, line: &str) {
             println!("{}", engine.book().format_depth(depth));
         }
         "trades" => print_trades(engine),
+        "stats" => println!("{}", engine.stats().format()),
         other => eprintln!("Unknown command: {other}"),
     }
 }
@@ -202,4 +214,48 @@ fn print_trades(engine: &MatchingEngine) {
         );
     }
     println!("============================\n");
+}
+
+fn run_benchmark(order_count: usize) {
+    if order_count == 0 {
+        eprintln!("order_count must be greater than zero");
+        std::process::exit(1);
+    }
+
+    let mut engine = MatchingEngine::new();
+    let start = Instant::now();
+
+    for index in 0..order_count {
+        let side = if index % 2 == 0 {
+            Side::Sell
+        } else {
+            Side::Buy
+        };
+        let quantity = (index % 10 + 1) as u64;
+        let price = benchmark_price(index, side);
+
+        engine
+            .submit_limit_order(side, quantity, price)
+            .expect("generated benchmark orders should be valid");
+    }
+
+    let elapsed = start.elapsed();
+    let throughput = order_count as f64 / elapsed.as_secs_f64();
+
+    println!("\n========== BENCHMARK ==========");
+    println!("Generated orders : {order_count}");
+    println!("Elapsed          : {:.3?}", elapsed);
+    println!("Throughput       : {:.2} orders/sec", throughput);
+    println!("===============================");
+    println!("{}", engine.stats().format());
+}
+
+fn benchmark_price(index: usize, side: Side) -> Price {
+    let offset = (index % 100) as i64;
+    let cents = match side {
+        Side::Sell => 10_000 + offset,
+        Side::Buy => 10_050 + offset,
+    };
+
+    Price::from_cents(cents).expect("benchmark price should be positive")
 }

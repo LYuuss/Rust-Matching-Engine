@@ -12,13 +12,25 @@ It implements a small but realistic subset of an exchange matching engine:
 - trade log
 - order cancellation
 - deterministic scenario runner
-- unit tests
+- engine statistics
+- simple benchmark command
+- integration tests
 
 ## Why this project matters
 
 A matching engine is the core component of many trading systems. It receives incoming orders, compares them with the opposite side of the order book, executes trades when prices cross, and stores the remaining quantity when an order is not fully filled.
 
 The goal here is not to build a production exchange. The goal is to show clean Rust, strong data-structure choices, and a solid understanding of trading infrastructure basics.
+
+## Technical highlights
+
+- `BTreeMap<Price, VecDeque<Order>>` for sorted price levels and FIFO time priority.
+- Integer price representation in cents/ticks instead of floating-point prices.
+- Deterministic order IDs and sequence numbers.
+- Maker/taker trade logs.
+- Partial fill handling on both incoming and resting orders.
+- Scenario runner for reproducible examples.
+- Lightweight benchmark using `std::time::Instant`.
 
 ## Project structure
 
@@ -34,6 +46,7 @@ rust_matching_engine/
 │   ├── main.rs
 │   ├── order.rs
 │   ├── order_book.rs
+│   ├── stats.rs
 │   ├── trade.rs
 │   └── types.rs
 └── tests/
@@ -105,6 +118,60 @@ You can also submit a single order to a fresh engine:
 cargo run -- submit buy 10 100.50
 ```
 
+## Statistics
+
+Inside a scenario, use:
+
+```txt
+stats
+```
+
+It prints:
+
+- submitted orders
+- resting orders
+- total trades
+- executed volume
+- resting bid/ask volume
+- best bid / best ask
+- spread
+- notional traded
+- average trade price
+
+Example:
+
+```txt
+========== ENGINE STATS ==========
+Submitted orders     : 4
+Resting orders       : 1
+Total trades         : 3
+Executed volume      : 12
+Resting bid volume   : 0
+Resting ask volume   : 1
+Best bid             : -
+Best ask             : 102.00
+Spread               : -
+Notional traded      : 1204.00
+Average trade price  : 100.33
+==================================
+```
+
+## Benchmark
+
+Run a deterministic benchmark with 100,000 generated orders:
+
+```bash
+cargo run --release -- benchmark 100000
+```
+
+Or use the default:
+
+```bash
+cargo run --release -- benchmark
+```
+
+This prints elapsed time, approximate throughput, and final engine statistics.
+
 ## Scenario file syntax
 
 ```txt
@@ -112,6 +179,7 @@ submit sell 10 100.00
 submit buy 4 101.00
 book 10
 trades
+stats
 ```
 
 Supported scenario commands:
@@ -121,6 +189,7 @@ submit <buy|sell> <quantity> <price>
 cancel <order_id>
 book [depth]
 trades
+stats
 ```
 
 ## Run tests
@@ -138,6 +207,7 @@ The tests cover:
 - price-time priority
 - cancellation
 - price parsing without floats
+- engine statistics
 
 ## Example output
 
@@ -153,13 +223,13 @@ TRADE taker=2 maker=1 qty=4 price=100.00
 ## CV bullet
 
 ```txt
-Built a simplified matching engine in Rust implementing limit orders, price-time priority, partial fills, cancellation, trade logs and unit-tested order book logic.
+Built a simplified matching engine in Rust implementing limit orders, price-time priority, partial fills, cancellation, trade logs, engine statistics, benchmarking and integration tests.
 ```
 
 French version:
 
 ```txt
-Développement d’un mini matching engine en Rust : ordres limit buy/sell, priorité prix/temps, exécutions partielles, annulation d’ordres, journal des trades et tests unitaires.
+Développement d’un mini matching engine en Rust : ordres limit buy/sell, priorité prix/temps, exécutions partielles, annulation d’ordres, statistiques moteur, benchmark simple et tests d’intégration.
 ```
 
 ## Next improvements

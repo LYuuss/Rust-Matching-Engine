@@ -1,5 +1,6 @@
 use crate::order::Order;
 use crate::order_book::OrderBook;
+use crate::stats::EngineStats;
 use crate::trade::Trade;
 use crate::types::{OrderId, Price, Quantity, Side};
 
@@ -69,6 +70,33 @@ impl MatchingEngine {
 
     pub fn trades(&self) -> &[Trade] {
         &self.trade_log
+    }
+
+    pub fn stats(&self) -> EngineStats {
+        let executed_volume = self
+            .trade_log
+            .iter()
+            .map(|trade| trade.quantity)
+            .sum::<Quantity>();
+
+        let notional_traded_cents = self
+            .trade_log
+            .iter()
+            .map(|trade| trade.quantity as u128 * trade.price.cents() as u128)
+            .sum::<u128>();
+
+        EngineStats {
+            submitted_orders: self.next_order_id - 1,
+            resting_orders: self.book.total_orders(),
+            total_trades: self.trade_log.len(),
+            executed_volume,
+            resting_bid_volume: self.book.total_volume(Side::Buy),
+            resting_ask_volume: self.book.total_volume(Side::Sell),
+            best_bid: self.book.best_bid(),
+            best_ask: self.book.best_ask(),
+            spread_cents: self.book.spread(),
+            notional_traded_cents,
+        }
     }
 
     fn match_buy_order(&mut self, incoming: &mut Order) -> Vec<Trade> {

@@ -1,8 +1,8 @@
-# Basic scenario for the Rust matching engine
+# Basic deterministic scenario for the Rust matching engine
 submit sell 10 100.00
-submit sell 5 101.00
-submit buy 4 99.00
-book 10
-submit buy 12 101.00
+submit buy 4 101.00
+submit sell 3 102.00
+submit buy 8 102.00
 book 10
 trades
+stats

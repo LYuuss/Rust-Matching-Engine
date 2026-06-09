@@ -120,3 +120,32 @@ fn price_parser_uses_cents_not_floats() {
     assert_eq!(price("100.5").to_string(), "100.50");
     assert_eq!(price("100.05").to_string(), "100.05");
 }
+
+#[test]
+fn stats_track_orders_trades_volume_and_spread() {
+    let mut engine = MatchingEngine::new();
+
+    engine
+        .submit_limit_order(Side::Sell, 10, price("100.00"))
+        .unwrap();
+    engine
+        .submit_limit_order(Side::Buy, 4, price("101.00"))
+        .unwrap();
+    engine
+        .submit_limit_order(Side::Buy, 7, price("99.00"))
+        .unwrap();
+
+    let stats = engine.stats();
+
+    assert_eq!(stats.submitted_orders, 3);
+    assert_eq!(stats.resting_orders, 2);
+    assert_eq!(stats.total_trades, 1);
+    assert_eq!(stats.executed_volume, 4);
+    assert_eq!(stats.resting_bid_volume, 7);
+    assert_eq!(stats.resting_ask_volume, 6);
+    assert_eq!(stats.best_bid, Some(price("99.00")));
+    assert_eq!(stats.best_ask, Some(price("100.00")));
+    assert_eq!(stats.spread_cents, Some(100));
+    assert_eq!(stats.notional_traded_cents, 40_000);
+    assert_eq!(stats.average_trade_price(), Some("100.00".to_string()));
+}
