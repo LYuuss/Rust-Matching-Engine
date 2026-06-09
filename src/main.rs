@@ -126,7 +126,10 @@ fn submit_command(engine: &mut MatchingEngine, parts: &[&str]) {
     let quantity = match parts[2].parse::<u64>() {
         Ok(quantity) => quantity,
         Err(_) => {
-            eprintln!("invalid quantity '{}': expected a positive integer", parts[2]);
+            eprintln!(
+                "invalid quantity '{}': expected a positive integer",
+                parts[2]
+            );
             return;
         }
     };

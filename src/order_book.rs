@@ -67,7 +67,12 @@ impl OrderBook {
 
         for (price, orders) in self.asks.iter().take(depth) {
             let quantity: Quantity = orders.iter().map(|order| order.remaining).sum();
-            output.push_str(&format!("{:<10} {:<10} {}\n", price, quantity, orders.len()));
+            output.push_str(&format!(
+                "{:<10} {:<10} {}\n",
+                price,
+                quantity,
+                orders.len()
+            ));
         }
 
         output.push_str("-------------------------------\n");
@@ -77,7 +82,12 @@ impl OrderBook {
 
         for (price, orders) in self.bids.iter().rev().take(depth) {
             let quantity: Quantity = orders.iter().map(|order| order.remaining).sum();
-            output.push_str(&format!("{:<10} {:<10} {}\n", price, quantity, orders.len()));
+            output.push_str(&format!(
+                "{:<10} {:<10} {}\n",
+                price,
+                quantity,
+                orders.len()
+            ));
         }
 
         output.push_str("===============================\n");

@@ -23,7 +23,7 @@ The goal here is not to build a production exchange. The goal is to show clean R
 ## Project structure
 
 ```txt
-Rust-Matching-Engine/
+rust_matching_engine/
 ├── Cargo.toml
 ├── README.md
 ├── examples/
