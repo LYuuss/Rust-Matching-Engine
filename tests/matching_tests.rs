@@ -149,3 +149,64 @@ fn stats_track_orders_trades_volume_and_spread() {
     assert_eq!(stats.notional_traded_cents, 40_000);
     assert_eq!(stats.average_trade_price(), Some("100.00".to_string()));
 }
+
+#[test]
+fn filled_maker_order_cannot_be_cancelled_after_matching() {
+    let mut engine = MatchingEngine::new();
+
+    let resting_sell = engine
+        .submit_limit_order(Side::Sell, 5, price("100.00"))
+        .unwrap();
+    engine
+        .submit_limit_order(Side::Buy, 5, price("100.00"))
+        .unwrap();
+
+    assert_eq!(engine.book().total_orders(), 0);
+    assert!(engine.cancel_order(resting_sell.order_id).is_none());
+}
+
+#[test]
+fn partially_filled_maker_order_stays_cancellable() {
+    let mut engine = MatchingEngine::new();
+
+    let resting_sell = engine
+        .submit_limit_order(Side::Sell, 10, price("100.00"))
+        .unwrap();
+    engine
+        .submit_limit_order(Side::Buy, 4, price("100.00"))
+        .unwrap();
+
+    let cancelled = engine.cancel_order(resting_sell.order_id).unwrap();
+
+    assert_eq!(cancelled.id, resting_sell.order_id);
+    assert_eq!(cancelled.remaining, 6);
+    assert_eq!(engine.book().total_orders(), 0);
+    assert_eq!(engine.book().best_ask(), None);
+}
+
+#[test]
+fn cancel_order_uses_exact_side_and_price_level() {
+    let mut engine = MatchingEngine::new();
+
+    let buy_99 = engine
+        .submit_limit_order(Side::Buy, 5, price("99.00"))
+        .unwrap();
+    let buy_98 = engine
+        .submit_limit_order(Side::Buy, 7, price("98.00"))
+        .unwrap();
+    let sell_101 = engine
+        .submit_limit_order(Side::Sell, 3, price("101.00"))
+        .unwrap();
+
+    let cancelled = engine.cancel_order(buy_98.order_id).unwrap();
+
+    assert_eq!(cancelled.id, buy_98.order_id);
+    assert_eq!(engine.book().best_bid(), Some(price("99.00")));
+    assert_eq!(engine.book().best_ask(), Some(price("101.00")));
+    assert_eq!(engine.book().total_volume(Side::Buy), 5);
+    assert_eq!(engine.book().total_volume(Side::Sell), 3);
+
+    assert!(engine.cancel_order(buy_99.order_id).is_some());
+    assert!(engine.cancel_order(sell_101.order_id).is_some());
+    assert_eq!(engine.book().total_orders(), 0);
+}

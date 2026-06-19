@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::order::Order;
 use crate::order_book::OrderBook;
 use crate::stats::EngineStats;
@@ -11,12 +13,19 @@ pub struct OrderResponse {
     pub remaining: Quantity,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OrderLocation {
+    side: Side,
+    price: Price,
+}
+
 #[derive(Debug, Default)]
 pub struct MatchingEngine {
     book: OrderBook,
     next_order_id: OrderId,
     next_sequence: u64,
     trade_log: Vec<Trade>,
+    order_locations: HashMap<OrderId, OrderLocation>,
 }
 
 impl MatchingEngine {
@@ -26,6 +35,7 @@ impl MatchingEngine {
             next_order_id: 1,
             next_sequence: 1,
             trade_log: Vec::new(),
+            order_locations: HashMap::new(),
         }
     }
 
@@ -47,8 +57,11 @@ impl MatchingEngine {
             Side::Sell => self.match_sell_order(&mut incoming),
         };
 
+        let remaining = incoming.remaining;
         if !incoming.is_filled() {
-            self.book.add_order(incoming.clone());
+            self.order_locations
+                .insert(incoming.id, OrderLocation { side, price });
+            self.book.add_order(incoming);
         }
 
         self.trade_log.extend(trades.iter().cloned());
@@ -56,12 +69,13 @@ impl MatchingEngine {
         Ok(OrderResponse {
             order_id,
             trades,
-            remaining: incoming.remaining,
+            remaining,
         })
     }
 
     pub fn cancel_order(&mut self, order_id: OrderId) -> Option<Order> {
-        self.book.cancel(order_id)
+        let location = self.order_locations.remove(&order_id)?;
+        self.book.cancel_at(location.side, location.price, order_id)
     }
 
     pub fn book(&self) -> &OrderBook {
@@ -133,7 +147,9 @@ impl MatchingEngine {
                     });
 
                     if maker.is_filled() {
+                        let maker_order_id = maker.id;
                         ask_queue.pop_front();
+                        self.order_locations.remove(&maker_order_id);
                     }
                 }
 
@@ -182,7 +198,9 @@ impl MatchingEngine {
                     });
 
                     if maker.is_filled() {
+                        let maker_order_id = maker.id;
                         bid_queue.pop_front();
+                        self.order_locations.remove(&maker_order_id);
                     }
                 }
 

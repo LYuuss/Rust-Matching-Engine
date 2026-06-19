@@ -14,6 +14,7 @@ It implements a small but realistic subset of an exchange matching engine:
 - deterministic scenario runner
 - engine statistics
 - simple benchmark command
+- indexed order lookup for faster cancellation
 - integration tests
 
 ## Why this project matters
@@ -31,6 +32,7 @@ The goal here is not to build a production exchange. The goal is to show clean R
 - Partial fill handling on both incoming and resting orders.
 - Scenario runner for reproducible examples.
 - Lightweight benchmark using `std::time::Instant`.
+- `HashMap<OrderId, OrderLocation>` index so cancellation can jump directly to the expected side and price level instead of scanning every price level.
 
 ## Project structure
 
@@ -156,6 +158,24 @@ Average trade price  : 100.33
 ==================================
 ```
 
+## Cancellation index
+
+The engine keeps an internal order-location index:
+
+```txt
+OrderId -> (Side, Price)
+```
+
+This avoids scanning the whole order book when cancelling an order. The engine can directly jump to the expected side and price level, then remove the order from the FIFO queue at that level.
+
+The index is updated when:
+
+- a resting order is added to the book
+- a resting order is fully filled by an incoming order
+- an order is cancelled
+
+This is still simplified compared to a production exchange, but it is a more realistic design than a full linear scan across all price levels.
+
 ## Benchmark
 
 Run a deterministic benchmark with 100,000 generated orders:
@@ -206,6 +226,7 @@ The tests cover:
 - incoming remainder resting after a partial execution
 - price-time priority
 - cancellation
+- cancellation after full and partial fills
 - price parsing without floats
 - engine statistics
 
@@ -223,13 +244,13 @@ TRADE taker=2 maker=1 qty=4 price=100.00
 ## CV bullet
 
 ```txt
-Built a simplified matching engine in Rust implementing limit orders, price-time priority, partial fills, cancellation, trade logs, engine statistics, benchmarking and integration tests.
+Built a simplified matching engine in Rust implementing limit orders, price-time priority, partial fills, indexed cancellation, trade logs, engine statistics, benchmarking and integration tests.
 ```
 
 French version:
 
 ```txt
-Développement d’un mini matching engine en Rust : ordres limit buy/sell, priorité prix/temps, exécutions partielles, annulation d’ordres, statistiques moteur, benchmark simple et tests d’intégration.
+Développement d’un mini matching engine en Rust : ordres limit buy/sell, priorité prix/temps, exécutions partielles, annulation indexée d’ordres, statistiques moteur, benchmark simple et tests d’intégration.
 ```
 
 ## Next improvements

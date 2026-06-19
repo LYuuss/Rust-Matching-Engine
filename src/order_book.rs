@@ -35,6 +35,25 @@ impl OrderBook {
         Some(self.best_ask()?.cents() - self.best_bid()?.cents())
     }
 
+    pub fn cancel_at(&mut self, side: Side, price: Price, order_id: OrderId) -> Option<Order> {
+        let levels = match side {
+            Side::Buy => &mut self.bids,
+            Side::Sell => &mut self.asks,
+        };
+
+        let cancelled = {
+            let queue = levels.get_mut(&price)?;
+            let index = queue.iter().position(|order| order.id == order_id)?;
+            queue.remove(index)
+        };
+
+        if levels.get(&price).is_some_and(VecDeque::is_empty) {
+            levels.remove(&price);
+        }
+
+        cancelled
+    }
+
     pub fn cancel(&mut self, order_id: OrderId) -> Option<Order> {
         Self::cancel_from_side(&mut self.bids, order_id)
             .or_else(|| Self::cancel_from_side(&mut self.asks, order_id))
