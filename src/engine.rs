@@ -45,16 +45,13 @@ impl MatchingEngine {
         quantity: Quantity,
         price: Price,
     ) -> Result<OrderResponse, String> {
-        let order_id = self.next_order_id;
-        self.next_order_id += 1;
-
-        let sequence = self.next_sequence;
-        self.next_sequence += 1;
+        let order_id = self.allocate_order_id();
+        let sequence = self.allocate_sequence();
 
         let mut incoming = Order::new(order_id, side, price, quantity, sequence)?;
         let trades = match side {
-            Side::Buy => self.match_buy_order(&mut incoming),
-            Side::Sell => self.match_sell_order(&mut incoming),
+            Side::Buy => self.match_buy_limit_order(&mut incoming),
+            Side::Sell => self.match_sell_limit_order(&mut incoming),
         };
 
         let remaining = incoming.remaining;
@@ -63,6 +60,33 @@ impl MatchingEngine {
                 .insert(incoming.id, OrderLocation { side, price });
             self.book.add_order(incoming);
         }
+
+        self.trade_log.extend(trades.iter().cloned());
+
+        Ok(OrderResponse {
+            order_id,
+            trades,
+            remaining,
+        })
+    }
+
+    pub fn submit_market_order(
+        &mut self,
+        side: Side,
+        quantity: Quantity,
+    ) -> Result<OrderResponse, String> {
+        if quantity == 0 {
+            return Err("quantity must be greater than zero".to_string());
+        }
+
+        let order_id = self.allocate_order_id();
+        let _sequence = self.allocate_sequence();
+
+        let mut remaining = quantity;
+        let trades = match side {
+            Side::Buy => self.match_buy_market_order(order_id, &mut remaining),
+            Side::Sell => self.match_sell_market_order(order_id, &mut remaining),
+        };
 
         self.trade_log.extend(trades.iter().cloned());
 
@@ -113,7 +137,19 @@ impl MatchingEngine {
         }
     }
 
-    fn match_buy_order(&mut self, incoming: &mut Order) -> Vec<Trade> {
+    fn allocate_order_id(&mut self) -> OrderId {
+        let order_id = self.next_order_id;
+        self.next_order_id += 1;
+        order_id
+    }
+
+    fn allocate_sequence(&mut self) -> u64 {
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+        sequence
+    }
+
+    fn match_buy_limit_order(&mut self, incoming: &mut Order) -> Vec<Trade> {
         let mut trades = Vec::new();
 
         while incoming.remaining > 0 {
@@ -125,46 +161,18 @@ impl MatchingEngine {
                 break;
             }
 
-            let should_remove_level = {
-                let ask_queue = self
-                    .book
-                    .asks
-                    .get_mut(&best_ask_price)
-                    .expect("best ask price must exist");
-
-                while incoming.remaining > 0 && !ask_queue.is_empty() {
-                    let maker = ask_queue.front_mut().expect("queue is not empty");
-                    let quantity = incoming.remaining.min(maker.remaining);
-
-                    incoming.remaining -= quantity;
-                    maker.remaining -= quantity;
-
-                    trades.push(Trade {
-                        maker_order_id: maker.id,
-                        taker_order_id: incoming.id,
-                        price: maker.price,
-                        quantity,
-                    });
-
-                    if maker.is_filled() {
-                        let maker_order_id = maker.id;
-                        ask_queue.pop_front();
-                        self.order_locations.remove(&maker_order_id);
-                    }
-                }
-
-                ask_queue.is_empty()
-            };
-
-            if should_remove_level {
-                self.book.asks.remove(&best_ask_price);
-            }
+            self.consume_ask_level(
+                best_ask_price,
+                incoming.id,
+                &mut incoming.remaining,
+                &mut trades,
+            );
         }
 
         trades
     }
 
-    fn match_sell_order(&mut self, incoming: &mut Order) -> Vec<Trade> {
+    fn match_sell_limit_order(&mut self, incoming: &mut Order) -> Vec<Trade> {
         let mut trades = Vec::new();
 
         while incoming.remaining > 0 {
@@ -176,42 +184,136 @@ impl MatchingEngine {
                 break;
             }
 
-            let should_remove_level = {
-                let bid_queue = self
-                    .book
-                    .bids
-                    .get_mut(&best_bid_price)
-                    .expect("best bid price must exist");
-
-                while incoming.remaining > 0 && !bid_queue.is_empty() {
-                    let maker = bid_queue.front_mut().expect("queue is not empty");
-                    let quantity = incoming.remaining.min(maker.remaining);
-
-                    incoming.remaining -= quantity;
-                    maker.remaining -= quantity;
-
-                    trades.push(Trade {
-                        maker_order_id: maker.id,
-                        taker_order_id: incoming.id,
-                        price: maker.price,
-                        quantity,
-                    });
-
-                    if maker.is_filled() {
-                        let maker_order_id = maker.id;
-                        bid_queue.pop_front();
-                        self.order_locations.remove(&maker_order_id);
-                    }
-                }
-
-                bid_queue.is_empty()
-            };
-
-            if should_remove_level {
-                self.book.bids.remove(&best_bid_price);
-            }
+            self.consume_bid_level(
+                best_bid_price,
+                incoming.id,
+                &mut incoming.remaining,
+                &mut trades,
+            );
         }
 
         trades
+    }
+
+    fn match_buy_market_order(
+        &mut self,
+        taker_order_id: OrderId,
+        remaining: &mut Quantity,
+    ) -> Vec<Trade> {
+        let mut trades = Vec::new();
+
+        while *remaining > 0 {
+            let Some(best_ask_price) = self.book.best_ask() else {
+                break;
+            };
+
+            self.consume_ask_level(best_ask_price, taker_order_id, remaining, &mut trades);
+        }
+
+        trades
+    }
+
+    fn match_sell_market_order(
+        &mut self,
+        taker_order_id: OrderId,
+        remaining: &mut Quantity,
+    ) -> Vec<Trade> {
+        let mut trades = Vec::new();
+
+        while *remaining > 0 {
+            let Some(best_bid_price) = self.book.best_bid() else {
+                break;
+            };
+
+            self.consume_bid_level(best_bid_price, taker_order_id, remaining, &mut trades);
+        }
+
+        trades
+    }
+
+    fn consume_ask_level(
+        &mut self,
+        price: Price,
+        taker_order_id: OrderId,
+        remaining: &mut Quantity,
+        trades: &mut Vec<Trade>,
+    ) {
+        let should_remove_level = {
+            let ask_queue = self
+                .book
+                .asks
+                .get_mut(&price)
+                .expect("ask price level must exist");
+
+            while *remaining > 0 && !ask_queue.is_empty() {
+                let maker = ask_queue.front_mut().expect("queue is not empty");
+                let quantity = (*remaining).min(maker.remaining);
+
+                *remaining -= quantity;
+                maker.remaining -= quantity;
+
+                trades.push(Trade {
+                    maker_order_id: maker.id,
+                    taker_order_id,
+                    price: maker.price,
+                    quantity,
+                });
+
+                if maker.is_filled() {
+                    let maker_order_id = maker.id;
+                    ask_queue.pop_front();
+                    self.order_locations.remove(&maker_order_id);
+                }
+            }
+
+            ask_queue.is_empty()
+        };
+
+        if should_remove_level {
+            self.book.asks.remove(&price);
+        }
+    }
+
+    fn consume_bid_level(
+        &mut self,
+        price: Price,
+        taker_order_id: OrderId,
+        remaining: &mut Quantity,
+        trades: &mut Vec<Trade>,
+    ) {
+        let should_remove_level = {
+            let bid_queue = self
+                .book
+                .bids
+                .get_mut(&price)
+                .expect("bid price level must exist");
+
+            while *remaining > 0 && !bid_queue.is_empty() {
+                let maker = bid_queue.front_mut().expect("queue is not empty");
+                let quantity = (*remaining).min(maker.remaining);
+
+                *remaining -= quantity;
+                maker.remaining -= quantity;
+
+                trades.push(Trade {
+                    maker_order_id: maker.id,
+                    taker_order_id,
+                    price: maker.price,
+                    quantity,
+                });
+
+                if maker.is_filled() {
+                    let maker_order_id = maker.id;
+                    bid_queue.pop_front();
+                    self.order_locations.remove(&maker_order_id);
+                }
+            }
+
+            bid_queue.is_empty()
+        };
+
+        if should_remove_level {
+            self.book.bids.remove(&price);
+        }
     }
 }

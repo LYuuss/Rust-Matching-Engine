@@ -6,6 +6,7 @@ This project is designed as a short, high-signal portfolio project for Rust / tr
 It implements a small but realistic subset of an exchange matching engine:
 
 - limit buy/sell orders
+- market buy/sell orders
 - price-time priority
 - partial fills
 - resting order book
@@ -15,6 +16,7 @@ It implements a small but realistic subset of an exchange matching engine:
 - engine statistics
 - simple benchmark command
 - indexed order lookup for faster cancellation
+- market orders that consume available liquidity without resting in the book
 - integration tests
 
 ## Why this project matters
@@ -26,6 +28,8 @@ The goal here is not to build a production exchange. The goal is to show clean R
 ## Technical highlights
 
 - `BTreeMap<Price, VecDeque<Order>>` for sorted price levels and FIFO time priority.
+- Limit orders rest in the book when they are not fully matched.
+- Market orders consume the best available opposite-side liquidity and never rest in the book.
 - Integer price representation in cents/ticks instead of floating-point prices.
 - Deterministic order IDs and sequence numbers.
 - Maker/taker trade logs.
@@ -94,13 +98,15 @@ For a `BUY` order:
 match while best_ask <= buy_price
 ```
 
-For a `SELL` order:
+For a `SELL` limit order:
 
 ```txt
 match while best_bid >= sell_price
 ```
 
-The execution price is the maker/resting order price.
+For a market order, there is no limit price check: the order keeps consuming the best available opposite-side liquidity until it is fully filled or the opposite book is empty.
+
+The execution price is always the maker/resting order price.
 
 ## Run
 
@@ -118,6 +124,12 @@ You can also submit a single order to a fresh engine:
 
 ```bash
 cargo run -- submit buy 10 100.50
+```
+
+Or submit a market order to a fresh engine:
+
+```bash
+cargo run -- submit-market buy 10
 ```
 
 ## Statistics
@@ -158,6 +170,27 @@ Average trade price  : 100.33
 ==================================
 ```
 
+## Market orders
+
+Market orders have no limit price. They immediately consume the best available opposite-side liquidity and never rest in the book.
+
+Example:
+
+```txt
+submit sell 5 100.00
+submit sell 5 101.00
+submit-market buy 7
+```
+
+Expected result:
+
+```txt
+TRADE taker=3 maker=1 qty=5 price=100.00
+TRADE taker=3 maker=2 qty=2 price=101.00
+```
+
+If there is not enough liquidity, the remaining market quantity is returned in the response but is not inserted into the order book.
+
 ## Cancellation index
 
 The engine keeps an internal order-location index:
@@ -197,6 +230,7 @@ This prints elapsed time, approximate throughput, and final engine statistics.
 ```txt
 submit sell 10 100.00
 submit buy 4 101.00
+submit-market buy 2
 book 10
 trades
 stats
@@ -206,6 +240,7 @@ Supported scenario commands:
 
 ```txt
 submit <buy|sell> <quantity> <price>
+submit-market <buy|sell> <quantity>
 cancel <order_id>
 book [depth]
 trades
@@ -227,6 +262,8 @@ The tests cover:
 - price-time priority
 - cancellation
 - cancellation after full and partial fills
+- market buy/sell orders
+- unfilled market quantity not resting in the book
 - price parsing without floats
 - engine statistics
 
@@ -244,24 +281,23 @@ TRADE taker=2 maker=1 qty=4 price=100.00
 ## CV bullet
 
 ```txt
-Built a simplified matching engine in Rust implementing limit orders, price-time priority, partial fills, indexed cancellation, trade logs, engine statistics, benchmarking and integration tests.
+Built a simplified matching engine in Rust implementing limit and market orders, price-time priority, partial fills, indexed cancellation, trade logs, engine statistics, benchmarking and integration tests.
 ```
 
 French version:
 
 ```txt
-Développement d’un mini matching engine en Rust : ordres limit buy/sell, priorité prix/temps, exécutions partielles, annulation indexée d’ordres, statistiques moteur, benchmark simple et tests d’intégration.
+Développement d’un mini matching engine en Rust : ordres limit et market buy/sell, priorité prix/temps, exécutions partielles, annulation indexée d’ordres, statistiques moteur, benchmark simple et tests d’intégration.
 ```
 
 ## Next improvements
 
 Good extensions for a stronger portfolio version:
 
-1. Add market orders.
-2. Add order status: accepted, partially filled, filled, cancelled, rejected.
-3. Add benchmarks with `criterion`.
-4. Add CSV scenario input/output.
-5. Add a simple TCP or REST API.
-6. Add latency measurements.
-7. Add multi-symbol support, e.g. BTC-USD, ETH-USD.
-8. Add persistent event replay.
+1. Add order status: accepted, partially filled, filled, cancelled, rejected.
+2. Add benchmarks with `criterion`.
+3. Add CSV scenario input/output.
+4. Add a simple TCP or REST API.
+5. Add latency measurements.
+6. Add multi-symbol support, e.g. BTC-USD, ETH-USD.
+7. Add persistent event replay.

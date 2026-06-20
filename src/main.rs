@@ -44,6 +44,15 @@ fn main() {
             execute_command(&mut engine, &command);
             println!("{}", engine.book().format_depth(5));
         }
+        "submit-market" => {
+            if args.len() != 4 {
+                eprintln!("Usage: cargo run -- submit-market <buy|sell> <quantity>");
+                std::process::exit(1);
+            }
+            let command = format!("submit-market {} {}", args[2], args[3]);
+            execute_command(&mut engine, &command);
+            println!("{}", engine.book().format_depth(5));
+        }
         _ => print_help(),
     }
 }
@@ -55,10 +64,12 @@ fn print_help() {
     println!("  cargo run -- demo");
     println!("  cargo run -- scenario examples/basic.txt");
     println!("  cargo run -- submit <buy|sell> <quantity> <price>");
+    println!("  cargo run -- submit-market <buy|sell> <quantity>");
     println!("  cargo run -- benchmark [order_count]");
     println!();
     println!("Scenario commands:");
     println!("  submit <buy|sell> <quantity> <price>");
+    println!("  submit-market <buy|sell> <quantity>");
     println!("  cancel <order_id>");
     println!("  book [depth]");
     println!("  trades");
@@ -78,6 +89,9 @@ submit sell 3 102.00
 
 # Buy order consumes the rest of the first ask and part of the second
 submit buy 8 102.00
+
+# Market buy consumes remaining liquidity at the best available ask
+submit-market buy 1
 
 book 10
 trades
@@ -107,6 +121,7 @@ fn execute_command(engine: &mut MatchingEngine, line: &str) {
 
     match parts[0] {
         "submit" => submit_command(engine, &parts),
+        "submit-market" => submit_market_command(engine, &parts),
         "cancel" => cancel_command(engine, &parts),
         "book" => {
             let depth = parts
@@ -162,6 +177,53 @@ fn submit_command(engine: &mut MatchingEngine, parts: &[&str]) {
                 side,
                 quantity,
                 price,
+                response.remaining,
+                response.trades.len()
+            );
+
+            for trade in response.trades {
+                println!(
+                    "TRADE taker={} maker={} qty={} price={}",
+                    trade.taker_order_id, trade.maker_order_id, trade.quantity, trade.price
+                );
+            }
+        }
+        Err(error) => eprintln!("{error}"),
+    }
+}
+
+fn submit_market_command(engine: &mut MatchingEngine, parts: &[&str]) {
+    if parts.len() != 3 {
+        eprintln!("Usage: submit-market <buy|sell> <quantity>");
+        return;
+    }
+
+    let side = match Side::from_str(parts[1]) {
+        Ok(side) => side,
+        Err(error) => {
+            eprintln!("{error}");
+            return;
+        }
+    };
+
+    let quantity = match parts[2].parse::<u64>() {
+        Ok(quantity) => quantity,
+        Err(_) => {
+            eprintln!(
+                "invalid quantity '{}': expected a positive integer",
+                parts[2]
+            );
+            return;
+        }
+    };
+
+    match engine.submit_market_order(side, quantity) {
+        Ok(response) => {
+            println!(
+                "MARKET_SUBMITTED id={} side={} qty={} remaining={} trades={}",
+                response.order_id,
+                side,
+                quantity,
                 response.remaining,
                 response.trades.len()
             );

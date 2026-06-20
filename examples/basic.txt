@@ -3,6 +3,7 @@ submit sell 10 100.00
 submit buy 4 101.00
 submit sell 3 102.00
 submit buy 8 102.00
+submit-market buy 1
 book 10
 trades
 stats
