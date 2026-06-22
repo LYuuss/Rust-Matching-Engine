@@ -4,6 +4,12 @@ submit buy 4 101.00
 submit sell 3 102.00
 submit buy 8 102.00
 submit-market buy 1
+
+# Modification demo: improve a resting buy price so it crosses a resting sell
+submit buy 5 99.00
+submit sell 3 101.00
+modify 6 5 101.00
+
 book 10
 trades
 stats

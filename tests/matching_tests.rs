@@ -286,3 +286,123 @@ fn market_order_rejects_zero_quantity() {
     assert!(result.is_err());
     assert_eq!(engine.stats().submitted_orders, 0);
 }
+
+#[test]
+fn decreasing_quantity_with_same_price_keeps_time_priority() {
+    let mut engine = MatchingEngine::new();
+
+    let first_buy = engine
+        .submit_limit_order(Side::Buy, 10, price("100.00"))
+        .unwrap();
+    let second_buy = engine
+        .submit_limit_order(Side::Buy, 5, price("100.00"))
+        .unwrap();
+
+    let modified = engine
+        .modify_order(first_buy.order_id, 4, price("100.00"))
+        .unwrap();
+
+    assert!(!modified.reprioritized);
+    assert_eq!(modified.trades.len(), 0);
+    assert_eq!(modified.remaining, 4);
+    assert_eq!(engine.book().total_volume(Side::Buy), 9);
+
+    let market_sell = engine.submit_market_order(Side::Sell, 6).unwrap();
+
+    assert_eq!(market_sell.trades.len(), 2);
+    assert_eq!(market_sell.trades[0].maker_order_id, first_buy.order_id);
+    assert_eq!(market_sell.trades[0].quantity, 4);
+    assert_eq!(market_sell.trades[1].maker_order_id, second_buy.order_id);
+    assert_eq!(market_sell.trades[1].quantity, 2);
+}
+
+#[test]
+fn increasing_quantity_with_same_price_loses_time_priority() {
+    let mut engine = MatchingEngine::new();
+
+    let first_buy = engine
+        .submit_limit_order(Side::Buy, 5, price("100.00"))
+        .unwrap();
+    let second_buy = engine
+        .submit_limit_order(Side::Buy, 5, price("100.00"))
+        .unwrap();
+
+    let modified = engine
+        .modify_order(first_buy.order_id, 8, price("100.00"))
+        .unwrap();
+
+    assert!(modified.reprioritized);
+    assert_eq!(modified.trades.len(), 0);
+    assert_eq!(modified.remaining, 8);
+
+    let market_sell = engine.submit_market_order(Side::Sell, 5).unwrap();
+
+    assert_eq!(market_sell.trades.len(), 1);
+    assert_eq!(market_sell.trades[0].maker_order_id, second_buy.order_id);
+    assert_eq!(market_sell.trades[0].quantity, 5);
+    assert_eq!(engine.book().total_volume(Side::Buy), 8);
+}
+
+#[test]
+fn price_change_reprioritizes_and_can_cross_the_book() {
+    let mut engine = MatchingEngine::new();
+
+    let resting_sell = engine
+        .submit_limit_order(Side::Sell, 3, price("101.00"))
+        .unwrap();
+    let buy = engine
+        .submit_limit_order(Side::Buy, 5, price("99.00"))
+        .unwrap();
+
+    let modified = engine
+        .modify_order(buy.order_id, 5, price("101.00"))
+        .unwrap();
+
+    assert!(modified.reprioritized);
+    assert_eq!(modified.order_id, buy.order_id);
+    assert_eq!(modified.trades.len(), 1);
+    assert_eq!(modified.trades[0].maker_order_id, resting_sell.order_id);
+    assert_eq!(modified.trades[0].taker_order_id, buy.order_id);
+    assert_eq!(modified.trades[0].quantity, 3);
+    assert_eq!(modified.trades[0].price, price("101.00"));
+    assert_eq!(modified.remaining, 2);
+    assert_eq!(engine.book().best_bid(), Some(price("101.00")));
+    assert_eq!(engine.book().best_ask(), None);
+    assert_eq!(engine.book().total_volume(Side::Buy), 2);
+}
+
+#[test]
+fn fully_filled_modified_order_is_removed_from_index() {
+    let mut engine = MatchingEngine::new();
+
+    engine
+        .submit_limit_order(Side::Sell, 5, price("101.00"))
+        .unwrap();
+    let buy = engine
+        .submit_limit_order(Side::Buy, 5, price("99.00"))
+        .unwrap();
+
+    let modified = engine
+        .modify_order(buy.order_id, 5, price("101.00"))
+        .unwrap();
+
+    assert_eq!(modified.remaining, 0);
+    assert_eq!(engine.book().total_orders(), 0);
+    assert!(engine.cancel_order(buy.order_id).is_none());
+}
+
+#[test]
+fn modify_rejects_unknown_or_zero_quantity_orders() {
+    let mut engine = MatchingEngine::new();
+
+    let missing = engine.modify_order(999, 5, price("100.00"));
+    assert!(missing.is_err());
+
+    let resting = engine
+        .submit_limit_order(Side::Buy, 5, price("100.00"))
+        .unwrap();
+    let zero_quantity = engine.modify_order(resting.order_id, 0, price("100.00"));
+
+    assert!(zero_quantity.is_err());
+    assert_eq!(engine.book().total_volume(Side::Buy), 5);
+}

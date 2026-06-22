@@ -13,6 +13,14 @@ pub struct OrderResponse {
     pub remaining: Quantity,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModifyOrderResponse {
+    pub order_id: OrderId,
+    pub trades: Vec<Trade>,
+    pub remaining: Quantity,
+    pub reprioritized: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OrderLocation {
     side: Side,
@@ -94,6 +102,79 @@ impl MatchingEngine {
             order_id,
             trades,
             remaining,
+        })
+    }
+
+    pub fn modify_order(
+        &mut self,
+        order_id: OrderId,
+        new_quantity: Quantity,
+        new_price: Price,
+    ) -> Result<ModifyOrderResponse, String> {
+        if new_quantity == 0 {
+            return Err("quantity must be greater than zero; cancel the order instead".to_string());
+        }
+
+        let location = self
+            .order_locations
+            .get(&order_id)
+            .copied()
+            .ok_or_else(|| format!("order {order_id} not found or not resting"))?;
+
+        let current_remaining = self
+            .book
+            .remaining_at(location.side, location.price, order_id)
+            .ok_or_else(|| format!("order {order_id} location index is stale"))?;
+
+        if new_price == location.price && new_quantity <= current_remaining {
+            let updated = self
+                .book
+                .update_remaining_at(location.side, location.price, order_id, new_quantity)
+                .ok_or_else(|| format!("order {order_id} location index is stale"))?;
+
+            return Ok(ModifyOrderResponse {
+                order_id,
+                trades: Vec::new(),
+                remaining: updated.remaining,
+                reprioritized: false,
+            });
+        }
+
+        let mut order = self
+            .book
+            .cancel_at(location.side, location.price, order_id)
+            .ok_or_else(|| format!("order {order_id} location index is stale"))?;
+        self.order_locations.remove(&order_id);
+
+        order.price = new_price;
+        order.quantity = new_quantity;
+        order.remaining = new_quantity;
+        order.sequence = self.allocate_sequence();
+
+        let trades = match order.side {
+            Side::Buy => self.match_buy_limit_order(&mut order),
+            Side::Sell => self.match_sell_limit_order(&mut order),
+        };
+
+        let remaining = order.remaining;
+        if !order.is_filled() {
+            self.order_locations.insert(
+                order.id,
+                OrderLocation {
+                    side: order.side,
+                    price: order.price,
+                },
+            );
+            self.book.add_order(order);
+        }
+
+        self.trade_log.extend(trades.iter().cloned());
+
+        Ok(ModifyOrderResponse {
+            order_id,
+            trades,
+            remaining,
+            reprioritized: true,
         })
     }
 

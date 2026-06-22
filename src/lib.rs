@@ -5,7 +5,7 @@ pub mod stats;
 pub mod trade;
 pub mod types;
 
-pub use engine::{MatchingEngine, OrderResponse};
+pub use engine::{MatchingEngine, ModifyOrderResponse, OrderResponse};
 pub use order::Order;
 pub use order_book::OrderBook;
 pub use stats::EngineStats;

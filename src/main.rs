@@ -70,6 +70,7 @@ fn print_help() {
     println!("Scenario commands:");
     println!("  submit <buy|sell> <quantity> <price>");
     println!("  submit-market <buy|sell> <quantity>");
+    println!("  modify <order_id> <new_quantity> <new_price>");
     println!("  cancel <order_id>");
     println!("  book [depth]");
     println!("  trades");
@@ -92,6 +93,11 @@ submit buy 8 102.00
 
 # Market buy consumes remaining liquidity at the best available ask
 submit-market buy 1
+
+# Modify a resting order to improve its price and cross the opposite side
+submit buy 5 99.00
+submit sell 3 101.00
+modify 6 5 101.00
 
 book 10
 trades
@@ -122,6 +128,7 @@ fn execute_command(engine: &mut MatchingEngine, line: &str) {
     match parts[0] {
         "submit" => submit_command(engine, &parts),
         "submit-market" => submit_market_command(engine, &parts),
+        "modify" => modify_command(engine, &parts),
         "cancel" => cancel_command(engine, &parts),
         "book" => {
             let depth = parts
@@ -236,6 +243,62 @@ fn submit_market_command(engine: &mut MatchingEngine, parts: &[&str]) {
             }
         }
         Err(error) => eprintln!("{error}"),
+    }
+}
+
+fn modify_command(engine: &mut MatchingEngine, parts: &[&str]) {
+    if parts.len() != 4 {
+        eprintln!("Usage: modify <order_id> <new_quantity> <new_price>");
+        return;
+    }
+
+    let order_id = match parts[1].parse::<u64>() {
+        Ok(order_id) => order_id,
+        Err(_) => {
+            eprintln!("invalid order id '{}'", parts[1]);
+            return;
+        }
+    };
+
+    let new_quantity = match parts[2].parse::<u64>() {
+        Ok(quantity) => quantity,
+        Err(_) => {
+            eprintln!(
+                "invalid quantity '{}': expected a positive integer",
+                parts[2]
+            );
+            return;
+        }
+    };
+
+    let new_price = match Price::parse(parts[3]) {
+        Ok(price) => price,
+        Err(error) => {
+            eprintln!("{error}");
+            return;
+        }
+    };
+
+    match engine.modify_order(order_id, new_quantity, new_price) {
+        Ok(response) => {
+            println!(
+                "MODIFIED id={} qty={} price={} remaining={} trades={} reprioritized={}",
+                response.order_id,
+                new_quantity,
+                new_price,
+                response.remaining,
+                response.trades.len(),
+                response.reprioritized
+            );
+
+            for trade in response.trades {
+                println!(
+                    "TRADE taker={} maker={} qty={} price={}",
+                    trade.taker_order_id, trade.maker_order_id, trade.quantity, trade.price
+                );
+            }
+        }
+        Err(error) => eprintln!("MODIFY_REJECTED id={order_id} reason={error}"),
     }
 }
 

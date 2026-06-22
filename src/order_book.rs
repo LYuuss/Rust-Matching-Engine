@@ -54,6 +54,38 @@ impl OrderBook {
         cancelled
     }
 
+    pub fn remaining_at(&self, side: Side, price: Price, order_id: OrderId) -> Option<Quantity> {
+        let levels = match side {
+            Side::Buy => &self.bids,
+            Side::Sell => &self.asks,
+        };
+
+        levels
+            .get(&price)?
+            .iter()
+            .find(|order| order.id == order_id)
+            .map(|order| order.remaining)
+    }
+
+    pub fn update_remaining_at(
+        &mut self,
+        side: Side,
+        price: Price,
+        order_id: OrderId,
+        new_remaining: Quantity,
+    ) -> Option<Order> {
+        let levels = match side {
+            Side::Buy => &mut self.bids,
+            Side::Sell => &mut self.asks,
+        };
+
+        let queue = levels.get_mut(&price)?;
+        let order = queue.iter_mut().find(|order| order.id == order_id)?;
+        order.quantity = new_remaining;
+        order.remaining = new_remaining;
+        Some(order.clone())
+    }
+
     pub fn cancel(&mut self, order_id: OrderId) -> Option<Order> {
         Self::cancel_from_side(&mut self.bids, order_id)
             .or_else(|| Self::cancel_from_side(&mut self.asks, order_id))
